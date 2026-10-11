@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>drainready — will kubectl drain finish on this node?</title>
+<meta name="description" content="drainready tells you, before you cordon anything, whether kubectl drain will finish on a Kubernetes node, and names the PodDisruptionBudget that would stall it.">
+<link rel="canonical" href="https://blackman99.github.io/drainready/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="logo-512.png" type="image/png" sizes="512x512">
+<link rel="apple-touch-icon" href="logo-512.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="drainready">
+<meta property="og:url" content="https://blackman99.github.io/drainready/">
+<meta property="og:title" content="drainready — will kubectl drain finish on this node?">
+<meta property="og:description" content="Know before you cordon: one command names the PodDisruptionBudget that would make kubectl drain hang forever.">
+<meta property="og:image" content="https://blackman99.github.io/drainready/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A quay crane unloading containers from a ship; one container is lashed down by a PodDisruptionBudget. Stencil: WILL THIS NODE DRAIN?">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="drainready — will kubectl drain finish on this node?">
+<meta name="twitter:description" content="Know before you cordon: one command names the PodDisruptionBudget that would make kubectl drain hang forever.">
+<meta name="twitter:image" content="https://blackman99.github.io/drainready/og-image.png">
+<link rel="preload" href="fonts/bss800.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="mast">
+  <a class="brand" href="./"><img src="logo.svg" alt="" width="34" height="34"> drainready</a>
+  <nav><a href="docs/">Docs</a><a href="https://github.com/Blackman99/drainready">GitHub</a><a href="https://github.com/Blackman99/drainready/releases">Download</a></nav>
+</header>
+
+<main>
+<section class="port" aria-labelledby="h1">
+  <svg id="scene" viewBox="0 0 1200 560" role="img" aria-label="A quay crane lifts pod containers off a ship named after the node. One container is lashed down by a PodDisruptionBudget and cannot be lifted."></svg>
+  <div class="hull-text">
+    <h1 id="h1">Will this node drain?</h1>
+    <p class="reg">PORT OF <b>kubectl</b> · NODE <b id="nodename">ip-10-0-3-17</b></p>
+  </div>
+  <div class="console">
+    <p id="status" aria-live="polite">Crane idle.</p>
+    <div class="ctl">
+      <button id="run" type="button">Unload node</button>
+      <label><input id="fix" type="checkbox"> PDB <code>shop/db</code>: <span id="fixlabel">minAvailable: 2</span></label>
+    </div>
+  </div>
+</section>
+
+<section class="manifest" aria-labelledby="m">
+  <div class="plate"><span>BAY 01</span><h2 id="m">Know before you cordon</h2></div>
+  <p class="lede"><code>kubectl drain</code> evicts pods through the Eviction API. If a PodDisruptionBudget allows <b>0</b> disruptions, the API answers <code>429</code> and drain retries <em>forever</em>, printing a message that names the pod, not the budget. Node upgrades stall for hours. <b>drainready</b> reads the same pods and budgets first and tells you which container is lashed down, and why.</p>
+  <figure class="stow">
+    <figcaption>Stow plan · <code>drainready ip-10-0-3-17</code> · exit 1</figcaption>
+    <pre class="out"><span class="b">BLOCKED</span>  ip-10-0-3-17   9 pods: 5 ok, 1 wait, 0 need flag, 1 blocked, 2 skipped
+   <span class="b">BLOCKED</span>  shop/db-0          PDB shop/db allows 0 disruptions (healthy 2, needs 2, expected 2)
+                               fix: minAvailable (2) equals the replica count (2): scale up first,
+                                    or switch to maxUnavailable: 1
+   <span class="w">WAIT</span>     shop/web-7d9-x2k   2 pods of PDB shop/web are on this node but only 1 may go at once</pre>
+  </figure>
+</section>
+
+<section class="install" aria-labelledby="i">
+  <div class="box40">
+    <div class="csc">CSC SAFETY APPROVED · MAX GROSS 1 BINARY · TARE 0 DEPS</div>
+    <h2 id="i">Load it</h2>
+    <pre><code>go install github.com/Blackman99/drainready/cmd/drainready@latest
+# or grab a single binary for linux / macOS / windows:
+# https://github.com/Blackman99/drainready/releases
+
+drainready NODE                 # one node
+drainready -l eks.amazonaws.com/nodegroup=old   # a whole node group
+drainready --all --json         # every node, for CI / upgrade scripts</code></pre>
+  </div>
+</section>
+
+<section class="verdicts" aria-labelledby="v">
+  <div class="plate"><span>BAY 02</span><h2 id="v">What the crane sees</h2></div>
+  <ol class="stack">
+    <li class="c20 ok"><b>OK</b> Eviction admitted now: no budget, or the budget has room.</li>
+    <li class="c40 wait"><b>WAIT</b> More pods of one budget sit on this node than may leave at once. Drain finishes, but only as replacements turn ready elsewhere.</li>
+    <li class="c40 flag"><b>FLAG</b> Bare pod or <code>emptyDir</code>: drain refuses without <code>--force</code> / <code>--delete-emptydir-data</code>.</li>
+    <li class="c20 blk"><b>BLOCKED</b> Budget at 0, overlapping budgets, or <code>maxUnavailable: 0</code>. Drain hangs.</li>
+    <li class="c40 skip"><b>SKIP</b> DaemonSet, static and finished pods drain ignores anyway.</li>
+  </ol>
+  <p class="note">Exit codes: <code>0</code> ready · <code>1</code> blocked · <code>3</code> needs a flag · <code>2</code> error. Add <code>--server-dry-run</code> to have the API server confirm each eviction without evicting anything.</p>
+</section>
+</main>
+
+<footer class="quay">
+  <span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a> · <a href="docs/">Docs</a> · <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">Roadmap</a></span>
+</footer>
+<script src="app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+- [ ] Fits [GOAL.md](../GOAL.md)
+- [ ] `go test ./...` passes, gofmt clean
+- [ ] e2e case added if the behaviour depends on the API server

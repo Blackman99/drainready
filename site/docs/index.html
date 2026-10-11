@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>drainready docs — manifest</title>
+<meta name="description" content="Full documentation for drainready: install, usage, verdicts, exit codes, how the prediction works, and RBAC.">
+<link rel="canonical" href="https://blackman99.github.io/drainready/docs/">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../logo-512.png" type="image/png" sizes="512x512">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="drainready">
+<meta property="og:url" content="https://blackman99.github.io/drainready/docs/">
+<meta property="og:title" content="drainready docs — will kubectl drain finish on this node?">
+<meta property="og:description" content="Install, usage, verdicts, exit codes, RBAC and how drainready predicts a stuck kubectl drain.">
+<meta property="og:image" content="https://blackman99.github.io/drainready/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A quay crane unloading pod containers; one is lashed down by a PodDisruptionBudget.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="drainready docs">
+<meta name="twitter:description" content="Install, usage, verdicts, exit codes, RBAC and how drainready predicts a stuck kubectl drain.">
+<meta name="twitter:image" content="https://blackman99.github.io/drainready/og-image.png">
+<link rel="stylesheet" href="../style.css">
+<style>
+.doc{max-width:860px;padding:0 4vw 40px}
+.doc h2{font-size:clamp(26px,3.4vw,40px);margin:48px 0 10px;border-top:6px solid var(--navy);padding-top:10px}
+.doc pre{background:var(--navy);color:var(--bone);padding:16px;overflow-x:auto;font-size:14px}
+.doc table{border-collapse:collapse;width:100%}.doc td,.doc th{border-bottom:2px solid #13283f33;padding:8px;text-align:left;vertical-align:top}
+.doc :not(pre)>code{background:#13283f14;padding:0 4px}
+.toc{background:var(--rust);color:var(--bone);padding:16px 22px;margin-top:30px}.toc a{margin-right:16px;font-weight:600}
+</style>
+</head>
+<body>
+<header class="mast"><a class="brand" href="../"><img src="../logo.svg" alt="" width="34" height="34"> drainready</a><nav><a href="../">Home</a><a href="https://github.com/Blackman99/drainready">GitHub</a></nav></header>
+<main class="doc">
+<div class="toc">MANIFEST · <a href="#install">Install</a><a href="#usage">Usage</a><a href="#verdicts">Verdicts</a><a href="#how">How it works</a><a href="#rbac">RBAC</a><a href="#ci">In scripts</a></div>
+<h2 id="install">Install</h2>
+<pre>go install github.com/Blackman99/drainready/cmd/drainready@latest</pre>
+<p>Or download a single static binary (linux, macOS, windows; amd64/arm64) from <a href="https://github.com/Blackman99/drainready/releases">Releases</a>. It uses your normal kubeconfig, like kubectl.</p>
+<h2 id="usage">Usage</h2>
+<pre>drainready NODE [NODE...]          # check named nodes
+drainready -l LABEL_SELECTOR       # every node matching a label
+drainready --all                   # every node in the cluster
+  --context NAME                   kubeconfig context
+  --kubeconfig PATH
+  --force                          assume drain runs with --force
+  --delete-emptydir-data           assume drain runs with --delete-emptydir-data
+  --server-dry-run                 confirm with server-side dry-run evictions (nothing is evicted)
+  --json                           machine-readable output
+  -v                               also list OK and skipped pods</pre>
+<h2 id="verdicts">Verdicts and exit codes</h2>
+<table>
+<tr><th>Verdict</th><th>Meaning</th></tr>
+<tr><td><b>OK</b></td><td>Eviction admitted now.</td></tr>
+<tr><td><b>WAIT</b></td><td>More pods of one PDB on this node than <code>disruptionsAllowed</code>. Drain completes as replacements turn ready elsewhere, if there is room.</td></tr>
+<tr><td><b>FLAG</b></td><td>Bare pod (no controller) or <code>emptyDir</code>: drain refuses unless you pass <code>--force</code> / <code>--delete-emptydir-data</code>.</td></tr>
+<tr><td><b>BLOCKED</b></td><td>PDB allows 0 disruptions, pod matches more than one PDB, or the server dry-run refused. Drain would retry forever.</td></tr>
+<tr><td><b>SKIP</b></td><td>DaemonSet, mirror/static, finished or terminating pods.</td></tr>
+</table>
+<p>Exit code <code>0</code> ready (OK/WAIT) · <code>1</code> blocked · <code>3</code> needs a flag · <code>2</code> error.</p>
+<h2 id="how">How it works</h2>
+<p>drainready lists the pods on each node (<code>spec.nodeName</code>) and every PodDisruptionBudget, matches budgets to pods by selector in the same namespace, and applies the rules the Eviction API uses: <code>status.disruptionsAllowed</code>, multiple-PDB rejection, <code>unhealthyPodEvictionPolicy</code> for not-ready pods, and stale PDB status (<code>observedGeneration</code>). For each blocked pod it explains the cause: already-unhealthy replicas, <code>minAvailable</code> equal to the replica count, or <code>maxUnavailable: 0</code>.</p>
+<p>The PDB status can lag reality by a few seconds. <code>--server-dry-run</code> sends a real eviction with <code>dryRun=All</code> for every pod predicted OK, which also catches admission webhooks. Nothing is evicted or cordoned.</p>
+<h2 id="rbac">RBAC</h2>
+<pre>rules:
+- apiGroups: [""]       resources: [nodes, pods]            verbs: [get, list]
+- apiGroups: [policy]   resources: [poddisruptionbudgets]   verbs: [list]
+# only for --server-dry-run:
+- apiGroups: [""]       resources: [pods/eviction]          verbs: [create]</pre>
+<h2 id="ci">In upgrade scripts</h2>
+<pre>drainready -l eks.amazonaws.com/nodegroup=old || { echo "fix PDBs before upgrading"; exit 1; }</pre>
+<p>Use <code>--json</code> to feed results to other tools. See the <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">roadmap</a>.</p>
+</main>
+<footer class="quay"><span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a></span></footer>
+</body></html>

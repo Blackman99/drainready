@@ -1,0 +1,5 @@
+/drainready
+dist/
+out*.txt
+out.json
+drain.txt
