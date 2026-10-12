@@ -10,6 +10,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // Verdict for one pod (and, aggregated, for a node).
@@ -193,11 +194,27 @@ func fixFor(b *policyv1.PodDisruptionBudget) string {
 	switch {
 	case s.CurrentHealthy < s.DesiredHealthy:
 		return fmt.Sprintf("%d pod(s) already unhealthy: fix them, or set spec.unhealthyPodEvictionPolicy: AlwaysAllow", s.DesiredHealthy-s.CurrentHealthy)
-	case b.Spec.MaxUnavailable != nil && b.Spec.MaxUnavailable.IntValue() == 0 && b.Spec.MaxUnavailable.String() != "" && b.Spec.MaxUnavailable.String()[len(b.Spec.MaxUnavailable.String())-1] != '%':
-		return "maxUnavailable is 0: no voluntary disruption is ever allowed; use maxUnavailable: 1"
-	case b.Spec.MinAvailable != nil && s.DesiredHealthy >= s.ExpectedPods:
+	case isZeroDisruptions(b.Spec.MaxUnavailable):
+		return fmt.Sprintf("maxUnavailable is %s: no voluntary disruption is ever allowed; use maxUnavailable: 1", b.Spec.MaxUnavailable.String())
+	case isFullAvailability(b.Spec.MinAvailable):
+		return fmt.Sprintf("minAvailable is %s: no voluntary disruption is ever allowed; switch to maxUnavailable: 1", b.Spec.MinAvailable.String())
+	case b.Spec.MinAvailable != nil && s.ExpectedPods > 0 && s.DesiredHealthy >= s.ExpectedPods:
 		return fmt.Sprintf("minAvailable (%s) equals the replica count (%d): scale up first, or switch to maxUnavailable: 1", b.Spec.MinAvailable.String(), s.ExpectedPods)
 	default:
 		return "scale the workload up, or loosen the PDB"
 	}
+}
+
+// isZeroDisruptions reports maxUnavailable values that forbid every voluntary eviction (0 or 0%).
+func isZeroDisruptions(v *intstr.IntOrString) bool {
+	if v == nil {
+		return false
+	}
+	s := v.String()
+	return s == "0" || s == "0%"
+}
+
+// isFullAvailability reports minAvailable values that forbid every voluntary eviction (100%).
+func isFullAvailability(v *intstr.IntOrString) bool {
+	return v != nil && v.String() == "100%"
 }

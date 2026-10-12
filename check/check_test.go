@@ -106,3 +106,22 @@ func TestMaxUnavailableZeroFix(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 }
+
+func TestPercentZeroBudgetFixes(t *testing.T) {
+	// maxUnavailable: 0% should get the clear structural fix, not a generic one
+	b := mkPDB("z", "z", 0, 3, 3, 3)
+	zeroPct := intstr.FromString("0%")
+	b.Spec.MinAvailable, b.Spec.MaxUnavailable = nil, &zeroPct
+	p := find(Node("n", []corev1.Pod{mkPod("z1", "z", "ReplicaSet", true)}, []policyv1.PodDisruptionBudget{b}, Options{}), "z1")
+	if p.Verdict != Blocked || p.Fix[:16] != "maxUnavailable i" {
+		t.Fatalf("0%% fix: %+v", p)
+	}
+	// minAvailable: 100% likewise
+	b2 := mkPDB("full", "full", 0, 2, 2, 2)
+	full := intstr.FromString("100%")
+	b2.Spec.MinAvailable = &full
+	p2 := find(Node("n", []corev1.Pod{mkPod("f1", "full", "ReplicaSet", true)}, []policyv1.PodDisruptionBudget{b2}, Options{}), "f1")
+	if p2.Verdict != Blocked || p2.Fix[:12] != "minAvailable" {
+		t.Fatalf("100%% fix: %+v", p2)
+	}
+}

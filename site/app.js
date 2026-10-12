@@ -6,7 +6,7 @@
   const fix = document.getElementById("fix");
   const fixLabel = document.getElementById("fixlabel");
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const C = { navy: "#13283f", rust: "#b8432f", rustd: "#8f3222", steel: "#3d6a9e", bone: "#f1ead9", sea: "#6f8ea3", conc: "#c9c3b4" };
+  const C = { navy: "#13283f", rust: "#b8432f", rustd: "#8f3222", steel: "#3d6a9e", bone: "#f1ead9", sea: "#6f8ea3", conc: "#c9c3b4", haze: "#e6ecef" };
   const W = 132, H = 48, BOOM = 96;
   const el = (n, a, p = svg) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); p.appendChild(e); return e; };
 
@@ -17,9 +17,16 @@
     el("rect", { x: 0, y: 0, width: 3, height: 10, fill: col }, p);
   }
   el("rect", { x: 0, y: 470, width: 1200, height: 90, fill: C.sea });
-  for (let i = 0; i < 9; i++) el("path", { d: `M${i * 140 - 20} ${500 + (i % 3) * 16}h70`, stroke: C.haze || "#e6ecef", "stroke-width": 3, opacity: .5, class: "wave" });
+  for (let i = 0; i < 9; i++) el("path", { d: `M${i * 140 - 20} ${500 + (i % 3) * 16}h70`, stroke: C.haze, "stroke-width": 3, opacity: .5, class: "wave" });
   el("rect", { x: 0, y: 430, width: 342, height: 130, fill: C.conc });
   el("rect", { x: 0, y: 430, width: 342, height: 8, fill: C.navy });
+  // quay bollards + painted bay marks (flat, no glow)
+  for (const x of [48, 148, 248]) {
+    el("circle", { cx: x, cy: 448, r: 10, fill: C.navy });
+    el("rect", { x: x - 4, y: 438, width: 8, height: 14, fill: C.rust });
+  }
+  const quayMark = el("text", { x: 14, y: 520, "font-family": "BSS", "font-weight": 800, "font-size": 14, fill: C.navy, opacity: .55, "letter-spacing": 3 });
+  quayMark.textContent = "QUAY · BAY A";
   el("path", { d: "M350 340H1190L1150 470H380Z", fill: C.navy });
   el("rect", { x: 350, y: 334, width: 840, height: 6, fill: C.rust });
   // crane

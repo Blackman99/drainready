@@ -60,7 +60,7 @@ drainready --all                   # every node in the cluster
 </table>
 <p>Exit code <code>0</code> ready (OK/WAIT) · <code>1</code> blocked · <code>3</code> needs a flag · <code>2</code> error.</p>
 <h2 id="how">How it works</h2>
-<p>drainready lists the pods on each node (<code>spec.nodeName</code>) and every PodDisruptionBudget, matches budgets to pods by selector in the same namespace, and applies the rules the Eviction API uses: <code>status.disruptionsAllowed</code>, multiple-PDB rejection, <code>unhealthyPodEvictionPolicy</code> for not-ready pods, and stale PDB status (<code>observedGeneration</code>). For each blocked pod it explains the cause: already-unhealthy replicas, <code>minAvailable</code> equal to the replica count, or <code>maxUnavailable: 0</code>.</p>
+<p>drainready lists the pods on each node (<code>spec.nodeName</code>) and every PodDisruptionBudget, matches budgets to pods by selector in the same namespace, and applies the rules the Eviction API uses: <code>status.disruptionsAllowed</code>, multiple-PDB rejection, <code>unhealthyPodEvictionPolicy</code> for not-ready pods, and stale PDB status (<code>observedGeneration</code>). For each blocked pod it explains the cause: already-unhealthy replicas, <code>minAvailable</code> equal to the replica count (or <code>100%</code>), or <code>maxUnavailable: 0</code> / <code>0%</code>.</p>
 <p>The PDB status can lag reality by a few seconds. <code>--server-dry-run</code> sends a real eviction with <code>dryRun=All</code> for every pod predicted OK, which also catches admission webhooks. Nothing is evicted or cordoned.</p>
 <h2 id="rbac">RBAC</h2>
 <pre>rules:

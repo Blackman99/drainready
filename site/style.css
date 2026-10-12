@@ -21,6 +21,8 @@ h1{margin:0;font:800 clamp(30px,5vw,70px)/.9 "BSS";text-transform:uppercase;lett
 #status{margin:0;font:400 16px/1.4 "PlexM";min-height:1.4em}
 .ctl{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
 button{font:800 20px/1 "BSS";text-transform:uppercase;letter-spacing:.08em;background:var(--rust);color:var(--bone);border:0;border-bottom:4px solid var(--rustd);padding:12px 22px;cursor:pointer}
+button:hover{background:var(--rustd)}
+button:disabled{opacity:.55;cursor:wait}
 button:active{transform:translateY(2px);border-bottom-width:2px}
 button:focus-visible,input:focus-visible{outline:3px solid var(--bone);outline-offset:3px}
 label{font-size:16px;cursor:pointer}
