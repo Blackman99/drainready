@@ -20,14 +20,14 @@ Or download a single static binary for linux / macOS / windows from [Releases](h
 
 ### As a kubectl plugin
 
-Starting with the next release, each release also ships `kubectl-drainready` archives, so it runs as `kubectl drainready NODE`. Krew (pending acceptance into [krew-index](https://github.com/kubernetes-sigs/krew-index)):
+Since v0.2.0 every release also ships `kubectl-drainready_<os>_<arch>` archives, so it runs as `kubectl drainready NODE`. With krew (submission to [krew-index](https://github.com/kubernetes-sigs/krew-index) pending):
 
 ```bash
 kubectl krew install drainready   # once it is in krew-index
 kubectl drainready ip-10-0-3-17
 ```
 
-Until then, put any `kubectl-drainready` binary on your `PATH` (e.g. `go build -o ~/bin/kubectl-drainready ./cmd/drainready`) and kubectl will discover it.
+Until then, download a `kubectl-drainready_*` archive from [Releases](https://github.com/Blackman99/drainready/releases) and put the binary on your `PATH` (or `go build -o ~/bin/kubectl-drainready ./cmd/drainready`); kubectl discovers it automatically.
 
 ## Usage
 
