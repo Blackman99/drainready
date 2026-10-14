@@ -8,7 +8,7 @@
 
 ## v0.2 (next — week of 2026-10-12)
 Priority order from weekly review (0 traffic/stars after day 1; pain still live in ops posts):
-1. **Krew plugin** (`kubectl drainready`) + Homebrew tap — primary discovery for kubectl users
+1. **Krew plugin** (`kubectl drainready`) + Homebrew tap — primary discovery for kubectl users. Krew packaging merged 2026-10-14 (#1: `kubectl-drainready` archives, `.krew.yaml`, docs); remaining: tag a release with the krew archives, submit to krew-index (needs user approval), Homebrew tap
 2. **Structural zero-budget fixes** — clear messages for `maxUnavailable: 0%` and `minAvailable: 100%` (shipped 2026-10-12); keep tightening fix copy vs undrained-style audits without becoming a cluster-wide linter
 3. **Capacity hint** — will WAIT pods fit on remaining nodes (requests vs allocatable, taints)
 4. Rolling "node group" mode: simulate draining nodes one by one
