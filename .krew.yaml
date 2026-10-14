@@ -1,0 +1,56 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: drainready
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/Blackman99/drainready
+  shortDescription: Predict whether kubectl drain will finish on a node
+  description: |
+    Before you cordon anything, checks every pod on the target node(s)
+    against its PodDisruptionBudgets and drain rules and reports, per pod,
+    whether eviction will succeed, wait for replacements, need a flag
+    (--force, --delete-emptydir-data) or block forever, with a concrete fix.
+    Read-only: it never cordons, evicts or modifies the cluster.
+    Exit code is non-zero when a drain would block, for upgrade scripts.
+  caveats: |
+    Needs RBAC to get/list nodes, pods and poddisruptionbudgets.
+    --server-dry-run additionally needs create on pods/eviction
+    (dry-run only; nothing is evicted).
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_linux_amd64.tar.gz" .TagName }}
+    bin: kubectl-drainready
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_linux_arm64.tar.gz" .TagName }}
+    bin: kubectl-drainready
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_darwin_amd64.tar.gz" .TagName }}
+    bin: kubectl-drainready
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_darwin_arm64.tar.gz" .TagName }}
+    bin: kubectl-drainready
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_windows_amd64.zip" .TagName }}
+    bin: kubectl-drainready.exe
+  - selector:
+      matchLabels:
+        os: windows
+        arch: arm64
+    {{addURIAndSha "https://github.com/Blackman99/drainready/releases/download/{{ .TagName }}/kubectl-drainready_windows_arm64.zip" .TagName }}
+    bin: kubectl-drainready.exe

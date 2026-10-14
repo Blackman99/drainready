@@ -47,3 +47,27 @@ func TestUsageExit(t *testing.T) {
 		t.Fatal("version")
 	}
 }
+
+func TestDisplayName(t *testing.T) {
+	for in, want := range map[string]string{
+		"drainready":                           "drainready",
+		"/usr/local/bin/drainready":            "drainready",
+		"/home/u/.krew/bin/kubectl-drainready": "kubectl drainready",
+		`C:\krew\bin\kubectl-drainready.exe`:   "kubectl drainready",
+	} {
+		if got := displayName(strings.ReplaceAll(in, `\`, "/")); got != want {
+			t.Errorf("displayName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestUsageAsPlugin(t *testing.T) {
+	old := progName
+	progName = "kubectl drainready"
+	defer func() { progName = old }()
+	var o, e strings.Builder
+	run(nil, &o, &e)
+	if !strings.Contains(e.String(), "kubectl drainready [flags] NODE") {
+		t.Fatalf("usage: %s", e.String())
+	}
+}

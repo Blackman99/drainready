@@ -1,13 +1,31 @@
 version: 2
 builds:
-  - main: ./cmd/drainready
+  - id: drainready
+    main: ./cmd/drainready
     binary: drainready
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags: ["-s -w -X main.version={{.Version}}"]
+  # Same program, named for kubectl's plugin discovery: `kubectl drainready NODE`.
+  - id: kubectl-drainready
+    main: ./cmd/drainready
+    binary: kubectl-drainready
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
 archives:
-  - formats: [tar.gz]
+  - id: drainready
+    ids: [drainready]
+    formats: [tar.gz]
     format_overrides: [{goos: windows, formats: [zip]}]
+  # krew archives: kubectl-drainready + LICENSE, referenced by .krew.yaml.
+  - id: krew
+    ids: [kubectl-drainready]
+    name_template: "kubectl-drainready_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides: [{goos: windows, formats: [zip]}]
+    files: [LICENSE]
 checksum: {name_template: checksums.txt}
 changelog: {sort: asc}

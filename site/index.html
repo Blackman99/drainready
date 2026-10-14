@@ -68,6 +68,10 @@
 # or grab a single binary for linux / macOS / windows:
 # https://github.com/Blackman99/drainready/releases
 
+# as a kubectl plugin (krew-index submission pending):
+kubectl krew install drainready
+kubectl drainready NODE
+
 drainready NODE                 # one node
 drainready -l eks.amazonaws.com/nodegroup=old   # a whole node group
 drainready --all --json         # every node, for CI / upgrade scripts</code></pre>
