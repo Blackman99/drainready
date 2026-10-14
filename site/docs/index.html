@@ -37,6 +37,7 @@
 <div class="toc">MANIFEST · <a href="#install">Install</a><a href="#usage">Usage</a><a href="#verdicts">Verdicts</a><a href="#how">How it works</a><a href="#rbac">RBAC</a><a href="#ci">In scripts</a></div>
 <h2 id="install">Install</h2>
 <pre>go install github.com/Blackman99/drainready/cmd/drainready@latest</pre>
+<p>As a kubectl plugin (krew-index submission pending): <code>kubectl krew install drainready</code>, then <code>kubectl drainready NODE</code>. Any <code>kubectl-drainready</code> binary on your PATH also works.</p>
 <p>Or download a single static binary (linux, macOS, windows; amd64/arm64) from <a href="https://github.com/Blackman99/drainready/releases">Releases</a>. It uses your normal kubeconfig, like kubectl.</p>
 <h2 id="usage">Usage</h2>
 <pre>drainready NODE [NODE...]          # check named nodes

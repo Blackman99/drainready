@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -22,22 +23,38 @@ import (
 
 var version = "dev"
 
-const usage = `drainready - will kubectl drain finish on this node?
+const usageTmpl = `%[1]s - will kubectl drain finish on this node?
 
 Usage:
-  drainready [flags] NODE [NODE...]
-  drainready [flags] -l node-role.kubernetes.io/worker   (all matching nodes)
-  drainready [flags] --all
+  %[1]s [flags] NODE [NODE...]
+  %[1]s [flags] -l node-role.kubernetes.io/worker   (all matching nodes)
+  %[1]s [flags] --all
 
 Flags:
 `
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+// progName is "kubectl drainready" when installed as a kubectl plugin
+// (binary named kubectl-drainready, e.g. via krew), otherwise "drainready".
+var progName = "drainready"
+
+// displayName maps an argv[0] to the name users type.
+func displayName(argv0 string) string {
+	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
+	if strings.HasPrefix(base, "kubectl-") {
+		return "kubectl " + strings.ReplaceAll(strings.TrimPrefix(base, "kubectl-"), "-", " ")
+	}
+	return "drainready"
+}
+
+func main() {
+	progName = displayName(os.Args[0])
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
 func run(args []string, out, errw io.Writer) int {
 	fs := flag.NewFlagSet("drainready", flag.ContinueOnError)
 	fs.SetOutput(errw)
-	fs.Usage = func() { fmt.Fprint(errw, usage); fs.PrintDefaults() }
+	fs.Usage = func() { fmt.Fprintf(errw, usageTmpl, progName); fs.PrintDefaults() }
 	kubeconfig := fs.String("kubeconfig", "", "path to kubeconfig (default: $KUBECONFIG or ~/.kube/config)")
 	kctx := fs.String("context", "", "kubeconfig context to use")
 	selector := fs.String("l", "", "label selector for nodes")

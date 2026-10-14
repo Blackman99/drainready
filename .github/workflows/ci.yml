@@ -22,3 +22,17 @@ jobs:
       - run: go build -o drainready ./cmd/drainready
       - uses: helm/kind-action@v1
       - run: ./test/e2e.sh
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: actions/setup-go@v6
+        with: {go-version-file: go.mod}
+      - uses: goreleaser/goreleaser-action@v6
+        with: {version: '~> v2', args: release --snapshot --clean --skip=publish}
+      - name: krew archives contain kubectl-drainready + LICENSE
+        run: |
+          for f in dist/kubectl-drainready_*.tar.gz; do tar tzf "$f" | grep -qx kubectl-drainready; tar tzf "$f" | grep -qx LICENSE; done
+          for f in dist/kubectl-drainready_*.zip; do unzip -l "$f" | grep -q 'kubectl-drainready.exe'; unzip -l "$f" | grep -q LICENSE; done
+          ls dist/*.tar.gz dist/*.zip
