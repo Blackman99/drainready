@@ -4,7 +4,7 @@
 
 **Will `kubectl drain` finish on this node?** Know before you cordon.
 
-`kubectl drain` evicts pods through the Eviction API. When a PodDisruptionBudget allows 0 disruptions, the API answers `429` and drain **retries forever**. The message names the pod, not the budget. Managed node-group upgrades (EKS, AKS, GKE) stall for hours or fail. drainready reads the same pods and budgets up front, tells you which pods will block, and explains why: `minAvailable` equal to the replica count, `maxUnavailable: 0`, replicas already unhealthy, overlapping PDBs, bare pods, `emptyDir`.
+`kubectl drain` evicts pods through the Eviction API. When a PodDisruptionBudget allows 0 disruptions, the API answers `429` and drain **retries forever**. The message names the pod, not the budget. Managed node-group upgrades (EKS, AKS, GKE) stall for hours or fail. drainready reads the same pods and budgets up front, tells you which pods will block, and explains why: `minAvailable` equal to the replica count, `maxUnavailable: 0`, replicas already unhealthy, overlapping PDBs, a budget the controller cannot compute (`SyncFailed`, e.g. operator pods without a `/scale` subresource), bare pods, `emptyDir`.
 
 ![demo](site/demo.gif)
 
@@ -41,7 +41,7 @@ $ echo $?
 1
 ```
 
-Check a whole node group with `-l eks.amazonaws.com/nodegroup=old`, or every node with `--all`. Add `--server-dry-run` to have the API server confirm each eviction (nothing is evicted). Use `--json` for scripts. Exit codes: `0` ready · `1` blocked · `3` needs `--force`/`--delete-emptydir-data` · `2` error.
+Check a whole node group with `-l eks.amazonaws.com/nodegroup=old`, or every node with `--all`. Add `--server-dry-run` to have the API server confirm each eviction (nothing is evicted). Use `--json` for scripts, or `--markdown` for a report you can paste into a change ticket or PR comment. Exit codes: `0` ready · `1` blocked · `3` needs `--force`/`--delete-emptydir-data` · `2` error.
 
 Read-only. Needs `get/list` on nodes and pods and `list` on poddisruptionbudgets (plus `create` on `pods/eviction` for `--server-dry-run`).
 

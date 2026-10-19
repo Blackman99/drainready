@@ -56,12 +56,13 @@ drainready --all                   # every node in the cluster
 <tr><td><b>OK</b></td><td>Eviction admitted now.</td></tr>
 <tr><td><b>WAIT</b></td><td>More pods of one PDB on this node than <code>disruptionsAllowed</code>. Drain completes as replacements turn ready elsewhere, if there is room.</td></tr>
 <tr><td><b>FLAG</b></td><td>Bare pod (no controller) or <code>emptyDir</code>: drain refuses unless you pass <code>--force</code> / <code>--delete-emptydir-data</code>.</td></tr>
-<tr><td><b>BLOCKED</b></td><td>PDB allows 0 disruptions, pod matches more than one PDB, or the server dry-run refused. Drain would retry forever.</td></tr>
+<tr><td><b>BLOCKED</b></td><td>PDB allows 0 disruptions, its controller cannot compute it (<code>SyncFailed</code>), pod matches more than one PDB, or the server dry-run refused. Drain would retry forever.</td></tr>
 <tr><td><b>SKIP</b></td><td>DaemonSet, mirror/static, finished or terminating pods.</td></tr>
 </table>
 <p>Exit code <code>0</code> ready (OK/WAIT) · <code>1</code> blocked · <code>3</code> needs a flag · <code>2</code> error.</p>
 <h2 id="how">How it works</h2>
-<p>drainready lists the pods on each node (<code>spec.nodeName</code>) and every PodDisruptionBudget, matches budgets to pods by selector in the same namespace, and applies the rules the Eviction API uses: <code>status.disruptionsAllowed</code>, multiple-PDB rejection, <code>unhealthyPodEvictionPolicy</code> for not-ready pods, and stale PDB status (<code>observedGeneration</code>). For each blocked pod it explains the cause: already-unhealthy replicas, <code>minAvailable</code> equal to the replica count (or <code>100%</code>), or <code>maxUnavailable: 0</code> / <code>0%</code>.</p>
+<p>drainready lists the pods on each node (<code>spec.nodeName</code>) and every PodDisruptionBudget, matches budgets to pods by selector in the same namespace, and applies the rules the Eviction API uses: <code>status.disruptionsAllowed</code>, multiple-PDB rejection, <code>unhealthyPodEvictionPolicy</code> for not-ready pods, stale PDB status (<code>observedGeneration</code>), and the <code>DisruptionAllowed=False / SyncFailed</code> condition the disruption controller sets when it cannot compute a budget. For each blocked pod it explains the cause: already-unhealthy replicas, <code>minAvailable</code> equal to the replica count (or <code>100%</code>), or <code>maxUnavailable: 0</code> / <code>0%</code>.</p>
+<p><b>SyncFailed budgets.</b> <code>maxUnavailable</code> and percentage <code>minAvailable</code> need every selected pod to belong to a controller with a scale subresource. Pods owned by an operator CRD without <code>/scale</code> make the controller give up and pin <code>disruptionsAllowed</code> at 0; because it also never records <code>observedGeneration</code>, the budget looks merely "stale" while every eviction gets <code>429</code> forever. drainready reports these as BLOCKED with the controller's own message. Fix: an integer <code>minAvailable</code>, a <code>/scale</code> subresource on the CRD, or a narrower selector.</p>
 <p>The PDB status can lag reality by a few seconds. <code>--server-dry-run</code> sends a real eviction with <code>dryRun=All</code> for every pod predicted OK, which also catches admission webhooks. Nothing is evicted or cordoned.</p>
 <h2 id="rbac">RBAC</h2>
 <pre>rules:
@@ -71,7 +72,9 @@ drainready --all                   # every node in the cluster
 - apiGroups: [""]       resources: [pods/eviction]          verbs: [create]</pre>
 <h2 id="ci">In upgrade scripts</h2>
 <pre>drainready -l eks.amazonaws.com/nodegroup=old || { echo "fix PDBs before upgrading"; exit 1; }</pre>
-<p>Use <code>--json</code> to feed results to other tools. See the <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">roadmap</a>.</p>
+<p>Use <code>--json</code> to feed results to other tools, or <code>--markdown</code> to attach a report to the change ticket:</p>
+<pre>drainready --markdown -l eks.amazonaws.com/nodegroup=old &gt; drain-check.md</pre>
+<p> See the <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">roadmap</a>.</p>
 </main>
 <footer class="quay"><span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a></span></footer>
 </body></html>

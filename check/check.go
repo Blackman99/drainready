@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -154,26 +155,38 @@ func pod(p *corev1.Pod, m []*policyv1.PodDisruptionBudget, perPDB map[string]int
 	b := m[0]
 	allowed := b.Status.DisruptionsAllowed
 	healthy, desired, expected := b.Status.CurrentHealthy, b.Status.DesiredHealthy, b.Status.ExpectedPods
-	if b.Status.ObservedGeneration < b.Generation {
-		r.Verdict = Worse(r.Verdict, Wait)
-		r.Reason = "PDB status is stale (controller has not observed the latest spec)"
-		return r
-	}
-	// Unhealthy pods may be evicted regardless when AlwaysAllow is set, or
-	// (IfHealthyBudget) when the budget is currently met.
+	// Same order as the Eviction API (pkg/registry/core/pod/storage/eviction.go):
+	// not-ready pods may skip the budget, then the budget itself is checked.
 	if !ready(p) {
 		pol := b.Spec.UnhealthyPodEvictionPolicy
 		if pol != nil && *pol == policyv1.AlwaysAllow {
 			r.Reason = "not ready, and PDB allows evicting unhealthy pods (AlwaysAllow)"
 			return r
 		}
-		if healthy >= desired {
+		if healthy >= desired && desired > 0 {
 			r.Reason = "not ready; budget is met so the eviction is admitted"
 			return r
 		}
 	}
+	if msg, failed := syncFailed(b); failed {
+		// The controller pins disruptionsAllowed at 0 and never catches up
+		// until the PDB or its pods change: every eviction gets 429 forever.
+		r.Verdict = Blocked
+		r.Reason = fmt.Sprintf("PDB %s cannot be computed by the disruption controller (SyncFailed: %s), so it allows 0 disruptions", key(b), msg)
+		r.Fix = syncFailedFix
+		return r
+	}
+	if b.Status.ObservedGeneration < b.Generation {
+		r.Verdict = Worse(r.Verdict, Wait)
+		r.Reason = "PDB status is stale (controller has not observed the latest spec)"
+		return r
+	}
 	switch {
-	case allowed <= 0:
+	case allowed < 0:
+		r.Verdict = Blocked
+		r.Reason = fmt.Sprintf("PDB %s reports %d allowed disruptions: the API server refuses the eviction (403) and drain exits with an error", key(b), allowed)
+		r.Fix = "check the PDB status and the disruption controller (kube-controller-manager) logs"
+	case allowed == 0:
 		r.Verdict = Blocked
 		r.Reason = fmt.Sprintf("PDB %s allows 0 disruptions (healthy %d, needs %d, expected %d)", key(b), healthy, desired, expected)
 		r.Fix = fixFor(b)
@@ -187,6 +200,24 @@ func pod(p *corev1.Pod, m []*policyv1.PodDisruptionBudget, perPDB map[string]int
 		}
 	}
 	return r
+}
+
+const syncFailedFix = "maxUnavailable and percentage minAvailable need every selected pod to belong to a controller with a scale subresource " +
+	"(Deployment, ReplicaSet, StatefulSet, or a CRD with /scale); use an integer minAvailable, add /scale to the CRD, or narrow the selector"
+
+// syncFailed reports a DisruptionAllowed=False condition with reason
+// SyncFailed, which the disruption controller sets when it cannot compute
+// the budget (for example, pods owned by a CRD without a scale subresource).
+func syncFailed(b *policyv1.PodDisruptionBudget) (string, bool) {
+	c := meta.FindStatusCondition(b.Status.Conditions, policyv1.DisruptionAllowedCondition)
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != policyv1.SyncFailedReason {
+		return "", false
+	}
+	msg := c.Message
+	if msg == "" {
+		msg = "no message"
+	}
+	return msg, true
 }
 
 func fixFor(b *policyv1.PodDisruptionBudget) string {

@@ -14,8 +14,14 @@ Priority order from weekly review (0 traffic/stars after day 1; pain still live 
 4. Rolling "node group" mode: simulate draining nodes one by one
 
 ## v0.3
+- **SyncFailed budgets** (shipped 2026-10-19): PDBs whose controller cannot compute them (e.g. maxUnavailable over operator pods without `/scale`) are BLOCKED with the controller's message, even though they look "stale"; e2e reproduces it on kind. Eviction-order parity: unhealthy IfHealthyBudget needs desiredHealthy > 0; negative disruptionsAllowed is a 403, not a hang.
+- **Markdown report** `--markdown` for change tickets / PR comments (shipped 2026-10-19)
 - Detect PVC zone pinning (pods that cannot reschedule anywhere)
-- Markdown report for change tickets
+
+## Growth notes (2026-10-19 review)
+- Week 1 after v0.2.0: 0 stars, ~4 views, 127 clones (mostly CI/bots), first kubectl-drainready archive downloads. Discovery is the bottleneck, so krew-index submission (awaiting approval) stays the top outreach item.
+- Ecosystem: drain-stuck-on-PDB posts keep appearing (X, blogs on minAvailable == replicas with co-located replicas); kubernetes/kubernetes#141607 (drain retry loop on recreated pods) still open. A Sep 2026 thread pointed at SyncFailed PDBs as an overlooked cause, which led to this week's fix.
+- Next: release v0.3.0 with SyncFailed + markdown (needs approval), then capacity hint for WAIT pods.
 
 ## Growth notes (2026-10-12 review)
 - Niche vs competitors: undrained audits PDB objects cluster-wide; kubepreflight/upgrade are broad upgrade suites. drainready stays **per-node drain prediction that names the blocking PDB** (GOAL.md).
