@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackman99/drainready/check"
 	corev1 "k8s.io/api/core/v1"
@@ -69,5 +70,41 @@ func TestUsageAsPlugin(t *testing.T) {
 	run(nil, &o, &e)
 	if !strings.Contains(e.String(), "kubectl drainready [flags] NODE") {
 		t.Fatalf("usage: %s", e.String())
+	}
+}
+
+func TestMarkdown(t *testing.T) {
+	res := []check.NodeResult{
+		{Node: "n1", Verdict: check.Blocked, Pods: []check.PodResult{
+			{Namespace: "d", Pod: "db-0", Verdict: check.Blocked, PDBs: []string{"d/db"}, Reason: "PDB d/db allows 0 disruptions", Fix: "a | b\nc"},
+			{Namespace: "d", Pod: "web-1", Verdict: check.OK, Reason: "no PodDisruptionBudget covers it"},
+		}},
+		{Node: "n2", Verdict: check.OK, Pods: []check.PodResult{{Namespace: "d", Pod: "web-2", Verdict: check.OK}}},
+	}
+	var b strings.Builder
+	Markdown(&b, res, false, true, time.Date(2026, 10, 19, 2, 30, 0, 0, time.UTC))
+	out := b.String()
+	for _, want := range []string{
+		"## Drain readiness: BLOCKED",
+		"2026-10-19 02:30 UTC",
+		"confirmed with server dry-run evictions",
+		"### BLOCKED `n1`",
+		"| **BLOCKED** | `d/db-0` | `d/db` | PDB d/db allows 0 disruptions | a \\| b c |",
+		"### READY `n2`",
+		"No pod on this node would stall the drain.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "web-1") {
+		t.Errorf("OK pods should be hidden without -v:\n%s", out)
+	}
+}
+
+func TestJSONAndMarkdownExclusive(t *testing.T) {
+	var o, e strings.Builder
+	if run([]string{"--json", "--markdown", "n1"}, &o, &e) != 2 || !strings.Contains(e.String(), "not both") {
+		t.Fatalf("want exit 2, got %q", e.String())
 	}
 }

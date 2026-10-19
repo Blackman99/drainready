@@ -1,6 +1,7 @@
 package check
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -123,5 +124,55 @@ func TestPercentZeroBudgetFixes(t *testing.T) {
 	p2 := find(Node("n", []corev1.Pod{mkPod("f1", "full", "ReplicaSet", true)}, []policyv1.PodDisruptionBudget{b2}, Options{}), "f1")
 	if p2.Verdict != Blocked || p2.Fix[:12] != "minAvailable" {
 		t.Fatalf("100%% fix: %+v", p2)
+	}
+}
+
+func syncFailedPDB(stale bool) policyv1.PodDisruptionBudget {
+	b := mkPDB("op", "op", 0, 0, 0, 0)
+	one := intstr.FromInt32(1)
+	b.Spec.MinAvailable, b.Spec.MaxUnavailable = nil, &one
+	b.Generation = 1
+	if !stale {
+		b.Status.ObservedGeneration = 1
+	}
+	b.Status.Conditions = []metav1.Condition{{Type: policyv1.DisruptionAllowedCondition, Status: metav1.ConditionFalse,
+		Reason: policyv1.SyncFailedReason, Message: "configmaps does not implement the scale subresource"}}
+	return b
+}
+
+func TestSyncFailedIsBlockedEvenWhenStale(t *testing.T) {
+	// failSafe never bumps observedGeneration, so a brand-new SyncFailed PDB
+	// looks "stale"; the Eviction API still answers 429 forever.
+	for _, stale := range []bool{true, false} {
+		p := find(Node("n", []corev1.Pod{mkPod("op-0", "op", "Widget", true)},
+			[]policyv1.PodDisruptionBudget{syncFailedPDB(stale)}, Options{}), "op-0")
+		if p.Verdict != Blocked || !strings.Contains(p.Reason, "SyncFailed: configmaps does not implement") || !strings.Contains(p.Fix, "integer minAvailable") {
+			t.Fatalf("stale=%v: %+v", stale, p)
+		}
+	}
+	// AlwaysAllow still lets a not-ready pod go before the budget is consulted.
+	b := syncFailedPDB(true)
+	pol := policyv1.AlwaysAllow
+	b.Spec.UnhealthyPodEvictionPolicy = &pol
+	if v := Node("n", []corev1.Pod{mkPod("op-0", "op", "Widget", false)}, []policyv1.PodDisruptionBudget{b}, Options{}).Verdict; v != OK {
+		t.Fatalf("AlwaysAllow not-ready: want OK got %s", v)
+	}
+}
+
+func TestUnhealthyNeedsPositiveDesired(t *testing.T) {
+	// Eviction API admits a not-ready pod under IfHealthyBudget only when
+	// desiredHealthy > 0; 0 >= 0 must not count as "budget met".
+	b := mkPDB("e", "e", 0, 0, 0, 1)
+	p := find(Node("n", []corev1.Pod{mkPod("e-0", "e", "ReplicaSet", false)}, []policyv1.PodDisruptionBudget{b}, Options{}), "e-0")
+	if p.Verdict != Blocked {
+		t.Fatalf("want BLOCKED got %+v", p)
+	}
+}
+
+func TestNegativeAllowed(t *testing.T) {
+	b := mkPDB("n", "n", -1, 1, 2, 2)
+	p := find(Node("n", []corev1.Pod{mkPod("n-0", "n", "ReplicaSet", true)}, []policyv1.PodDisruptionBudget{b}, Options{}), "n-0")
+	if p.Verdict != Blocked || !strings.Contains(p.Reason, "403") {
+		t.Fatalf("%+v", p)
 	}
 }

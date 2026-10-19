@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>看起来只是状态未同步，却让 kubectl drain 永远卡住的 PDB</title>
+<meta name="description" content="控制器算不出来的 PodDisruptionBudget（SyncFailed）会把 disruptionsAllowed 固定为 0，看上去却像状态过期。如何在 drain 之前发现并修复。">
+<link rel="canonical" href="https://blackman99.github.io/drainready/blog/syncfailed-pdb/zh.html">
+<link rel="alternate" hreflang="en" href="https://blackman99.github.io/drainready/blog/syncfailed-pdb/">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="drainready">
+<meta property="og:url" content="https://blackman99.github.io/drainready/blog/syncfailed-pdb/zh.html">
+<meta property="og:title" content="看起来只是状态未同步，却让 kubectl drain 永远卡住的 PDB">
+<meta property="og:description" content="控制器算不出来的 PodDisruptionBudget（SyncFailed）会把 disruptionsAllowed 固定为 0，看上去却像状态过期。如何在 drain 之前发现并修复。">
+<meta property="og:image" content="https://blackman99.github.io/drainready/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A quay crane unloading pod containers; one is lashed down by a PodDisruptionBudget.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="看起来只是状态未同步，却让 kubectl drain 永远卡住的 PDB">
+<meta name="twitter:description" content="控制器算不出来的 PodDisruptionBudget（SyncFailed）会把 disruptionsAllowed 固定为 0，看上去却像状态过期。如何在 drain 之前发现并修复。">
+<meta name="twitter:image" content="https://blackman99.github.io/drainready/og-image.png">
+<link rel="stylesheet" href="../../style.css">
+<style>
+.doc{max-width:860px;padding:0 4vw 40px}
+.doc h2{font-size:clamp(26px,3.4vw,40px);margin:48px 0 10px;border-top:6px solid var(--navy);padding-top:10px}
+.doc pre{background:var(--navy);color:var(--bone);padding:16px;overflow-x:auto;font-size:14px}
+.doc table{border-collapse:collapse;width:100%}.doc td,.doc th{border-bottom:2px solid #13283f33;padding:8px;text-align:left;vertical-align:top}
+.doc :not(pre)>code{background:#13283f14;padding:0 4px}
+.toc{background:var(--rust);color:var(--bone);padding:16px 22px;margin-top:30px}.toc a{margin-right:16px;font-weight:600}
+.doc h1{font-size:clamp(34px,5vw,60px);margin:34px 0 6px;line-height:1}.byline{color:var(--navy);opacity:.75}</style>
+</head>
+<body>
+<header class="mast"><a class="brand" href="../../"><img src="../../logo.svg" alt="" width="34" height="34"> drainready</a><nav><a href="../../">Home</a><a href="../../docs/">Docs</a><a href="https://github.com/Blackman99/drainready">GitHub</a></nav></header>
+<main class="doc">
+<div class="toc">LOG · 2026-10-19 · <a href="./">English</a></div>
+<h1>看起来只是"状态未同步"，却让 drain 永远卡住的 PDB</h1>
+<p class="byline">一个控制器算不出来的 PodDisruptionBudget 如何让 <code>kubectl drain</code> 无限重试，以及如何在 cordon 之前发现它。</p>
+<h2>现象</h2>
+<p>你 drain 一个节点，有一个 Pod 怎么也走不掉。取决于这个 PDB 之前是否同步成功过，<code>kubectl drain</code> 要么一直重复 <code>Cannot evict pod as it would violate the pod's disruption budget</code>，要么打印一行 <code>evicting pod ...</code> 之后就再无输出。可这个 PDB 看上去没问题：<code>maxUnavailable: 1</code>，选中的 Pod 全部 Ready，没有不健康的副本，也没有重叠的 PDB，<code>kubectl get pdb</code> 却显示 <code>ALLOWED DISRUPTIONS 0</code>。</p>
+<h2>原因</h2>
+<p>要把 <code>maxUnavailable</code>（或百分比形式的 <code>minAvailable</code>）换算成具体数字，disruption 控制器需要知道期望副本数。它沿着每个被选中 Pod 的 controller ownerReference 找到属主，再读属主的 <code>scale</code> 子资源。Deployment、ReplicaSet、StatefulSet 都有，但很多 Operator 的 CRD 没有。</p>
+<p>查不到时，控制器走兜底逻辑：把 <code>disruptionsAllowed</code> 置 0，并写入一个 condition：</p>
+<pre>status:
+  disruptionsAllowed: 0
+  conditions:
+  - type: DisruptionAllowed
+    status: "False"
+    reason: SyncFailed
+    message: widgets.example.com does not implement the scale subresource</pre>
+<p>此后 Eviction API 对每次驱逐都返回 <code>429</code>，而 <code>kubectl drain</code> 把 429 当作"稍后重试"，于是永远重试下去。托管节点组升级只能等到自己的超时。</p>
+<h2>陷阱：它看起来只是"过期"</h2>
+<p>兜底逻辑不会更新 <code>status.observedGeneration</code>。一个从未同步成功的 PDB，<code>observedGeneration</code> 会一直小于 <code>metadata.generation</code>，和刚修改完、控制器还没追上的几秒钟里一模一样。把它理解成"状态还没处理，等一下就好"的工具都会预测为短暂等待。drainready 在本周之前也是这样判断的。</p>
+<p>这也解释了 drain 为什么会"沉默"。对服务端认为尚未处理的 PDB，Eviction API 返回带 <code>Retry-After</code> 头的 <code>429</code>，client-go 会在 kubectl 看到错误之前自行重试。在我们的 kind 测试里，<code>kubectl drain --dry-run=server --timeout=10s</code> 打印出 <code>evicting pod ops/widget-0</code> 后，20 秒内再无任何输出，直到测试把它杀掉。</p>
+<h2>手动检查</h2>
+<pre>kubectl get pdb -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.status.conditions[?(@.reason=="SyncFailed")].message}{"\n"}{end}' | awk -F'\t' '$2!=""'</pre>
+<p>输出的每一行，都是一个在修好之前会挡住其 Pod 所有自愿驱逐的 PDB。</p>
+<h2>修复办法</h2>
+<ul>
+<li>改用整数 <code>minAvailable</code>：控制器直接数被选中的 Pod，不需要查 scale。</li>
+<li>给 CRD 加上 <code>/scale</code> 子资源（CRD spec 里的 <code>subresources.scale</code>），让控制器能读到副本数。</li>
+<li>收窄 selector，只覆盖带 scale 子资源的控制器所管理的 Pod。</li>
+</ul>
+<h2>在 cordon 之前</h2>
+<p>drainready 现在会先检查 <code>DisruptionAllowed</code> condition，再看 <code>observedGeneration</code>（已在 <code>main</code> 分支，随下个版本发布），把这类 Pod 报为 BLOCKED，引用控制器的原始报错，并给出修复建议：</p>
+<pre>$ drainready ip-10-0-3-17
+BLOCKED  ip-10-0-3-17   7 pods: 4 ok, 0 wait, 0 need flag, 1 blocked, 2 skipped
+   BLOCKED  ops/widget-0  PDB ops/widget cannot be computed by the disruption controller (SyncFailed: ...), so it allows 0 disruptions
+                          fix: maxUnavailable and percentage minAvailable need every selected pod to belong to a controller with a scale subresource ...</pre>
+<p>CI 在真实的 kind 集群里用一个属主为 ConfigMap 的 Pod 复现这个场景，并用 <code>kubectl drain --dry-run=server</code> 交叉验证。加上 <code>--markdown</code> 可以生成直接贴进变更单的报告。</p>
+<p><a href="https://github.com/Blackman99/drainready">GitHub 上的 drainready</a> · <a href="../../docs/">文档</a></p>
+</main>
+<footer class="quay"><span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a></span></footer>
+</body></html>

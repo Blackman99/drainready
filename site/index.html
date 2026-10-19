@@ -74,7 +74,8 @@ kubectl drainready NODE
 
 drainready NODE                 # one node
 drainready -l eks.amazonaws.com/nodegroup=old   # a whole node group
-drainready --all --json         # every node, for CI / upgrade scripts</code></pre>
+drainready --all --json         # every node, for CI / upgrade scripts
+drainready --markdown NODE &gt; ticket.md   # report for the change ticket</code></pre>
   </div>
 </section>
 
@@ -84,7 +85,7 @@ drainready --all --json         # every node, for CI / upgrade scripts</code></p
     <li class="c20 ok"><b>OK</b> Eviction admitted now: no budget, or the budget has room.</li>
     <li class="c40 wait"><b>WAIT</b> More pods of one budget sit on this node than may leave at once. Drain finishes, but only as replacements turn ready elsewhere.</li>
     <li class="c40 flag"><b>FLAG</b> Bare pod or <code>emptyDir</code>: drain refuses without <code>--force</code> / <code>--delete-emptydir-data</code>.</li>
-    <li class="c20 blk"><b>BLOCKED</b> Budget at 0, overlapping budgets, or <code>maxUnavailable: 0</code>. Drain hangs.</li>
+    <li class="c20 blk"><b>BLOCKED</b> Budget at 0, overlapping budgets, <code>maxUnavailable: 0</code>, or a budget its controller cannot compute (<code>SyncFailed</code>). Drain hangs.</li>
     <li class="c40 skip"><b>SKIP</b> DaemonSet, static and finished pods drain ignores anyway.</li>
   </ol>
   <p class="note">Exit codes: <code>0</code> ready · <code>1</code> blocked · <code>3</code> needs a flag · <code>2</code> error. Add <code>--server-dry-run</code> to have the API server confirm each eviction without evicting anything.</p>
@@ -92,7 +93,7 @@ drainready --all --json         # every node, for CI / upgrade scripts</code></p
 </main>
 
 <footer class="quay">
-  <span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a> · <a href="docs/">Docs</a> · <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">Roadmap</a></span>
+  <span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a> · <a href="docs/">Docs</a> · <a href="blog/syncfailed-pdb/">Blog: the PDB that looks stale</a> · <a href="https://github.com/Blackman99/drainready/blob/main/ROADMAP.md">Roadmap</a></span>
 </footer>
 <script src="app.js" defer></script>
 </body>

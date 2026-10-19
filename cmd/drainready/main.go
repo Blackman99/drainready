@@ -62,6 +62,7 @@ func run(args []string, out, errw io.Writer) int {
 	force := fs.Bool("force", false, "assume drain runs with --force")
 	emptyDir := fs.Bool("delete-emptydir-data", false, "assume drain runs with --delete-emptydir-data")
 	asJSON := fs.Bool("json", false, "print JSON")
+	asMD := fs.Bool("markdown", false, "print a Markdown report (paste into a change ticket or PR)")
 	verbose := fs.Bool("v", false, "also list pods that are OK or skipped")
 	serverDry := fs.Bool("server-dry-run", false, "confirm each pod with a server-side dry-run eviction (nothing is evicted)")
 	showVer := fs.Bool("version", false, "print version")
@@ -71,6 +72,10 @@ func run(args []string, out, errw io.Writer) int {
 	if *showVer {
 		fmt.Fprintln(out, "drainready", version)
 		return 0
+	}
+	if *asJSON && *asMD {
+		fmt.Fprintln(errw, "drainready: use --json or --markdown, not both")
+		return 2
 	}
 	nodes := fs.Args()
 	if len(nodes) == 0 && *selector == "" && !*all {
@@ -106,6 +111,8 @@ func run(args []string, out, errw io.Writer) int {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		enc.Encode(results)
+	} else if *asMD {
+		Markdown(out, results, *verbose, *serverDry, time.Now())
 	} else {
 		Print(out, results, *verbose)
 	}
@@ -197,6 +204,56 @@ func Print(w io.Writer, results []check.NodeResult, verbose bool) {
 		}
 		tw.Flush()
 	}
+}
+
+// Markdown renders a report for change tickets and PR comments.
+func Markdown(w io.Writer, results []check.NodeResult, verbose, serverDry bool, at time.Time) {
+	worst := check.OK
+	for _, r := range results {
+		worst = check.Worse(worst, r.Verdict)
+	}
+	fmt.Fprintf(w, "## Drain readiness: %s\n\n", mark(worst))
+	how := "pods and PodDisruptionBudgets"
+	if serverDry {
+		how += ", confirmed with server dry-run evictions"
+	}
+	fmt.Fprintf(w, "Checked %d node(s) at %s with drainready %s (%s). Nothing was cordoned or evicted.\n",
+		len(results), at.UTC().Format("2006-01-02 15:04 UTC"), version, how)
+	for _, r := range results {
+		counts := map[check.Verdict]int{}
+		for _, p := range r.Pods {
+			counts[p.Verdict]++
+		}
+		fmt.Fprintf(w, "\n### %s `%s`\n\n%d pods: %d ok, %d wait, %d need flag, %d blocked, %d skipped\n",
+			mark(r.Verdict), r.Node, len(r.Pods), counts[check.OK], counts[check.Wait], counts[check.Flag], counts[check.Blocked], counts[check.Skip])
+		var rows []check.PodResult
+		for _, p := range r.Pods {
+			if verbose || (p.Verdict != check.OK && p.Verdict != check.Skip) {
+				rows = append(rows, p)
+			}
+		}
+		if len(rows) == 0 {
+			fmt.Fprintln(w, "\nNo pod on this node would stall the drain.")
+			continue
+		}
+		fmt.Fprintln(w, "\n| Verdict | Pod | PDB | Reason | Fix |\n|---|---|---|---|---|")
+		for _, p := range rows {
+			pdbs := ""
+			for i, b := range p.PDBs {
+				if i > 0 {
+					pdbs += ", "
+				}
+				pdbs += "`" + b + "`"
+			}
+			fmt.Fprintf(w, "| **%s** | `%s/%s` | %s | %s | %s |\n", p.Verdict, p.Namespace, p.Pod, pdbs, cell(p.Reason), cell(p.Fix))
+		}
+	}
+}
+
+// cell makes text safe inside a Markdown table cell.
+func cell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func mark(v check.Verdict) string {
