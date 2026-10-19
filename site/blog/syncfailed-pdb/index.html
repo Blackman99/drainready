@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The PDB that looks stale but never lets kubectl drain finish</title>
+<meta name="description" content="A PodDisruptionBudget the disruption controller cannot compute (SyncFailed) pins disruptionsAllowed at 0 and looks merely stale. How to spot and fix it before you drain.">
+<link rel="canonical" href="https://blackman99.github.io/drainready/blog/syncfailed-pdb/">
+<link rel="alternate" hreflang="zh" href="https://blackman99.github.io/drainready/blog/syncfailed-pdb/zh.html">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="drainready">
+<meta property="og:url" content="https://blackman99.github.io/drainready/blog/syncfailed-pdb/">
+<meta property="og:title" content="The PDB that looks stale but never lets kubectl drain finish">
+<meta property="og:description" content="A PodDisruptionBudget the disruption controller cannot compute (SyncFailed) pins disruptionsAllowed at 0 and looks merely stale. How to spot and fix it before you drain.">
+<meta property="og:image" content="https://blackman99.github.io/drainready/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A quay crane unloading pod containers; one is lashed down by a PodDisruptionBudget.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The PDB that looks stale but never lets kubectl drain finish">
+<meta name="twitter:description" content="A PodDisruptionBudget the disruption controller cannot compute (SyncFailed) pins disruptionsAllowed at 0 and looks merely stale. How to spot and fix it before you drain.">
+<meta name="twitter:image" content="https://blackman99.github.io/drainready/og-image.png">
+<link rel="stylesheet" href="../../style.css">
+<style>
+.doc{max-width:860px;padding:0 4vw 40px}
+.doc h2{font-size:clamp(26px,3.4vw,40px);margin:48px 0 10px;border-top:6px solid var(--navy);padding-top:10px}
+.doc pre{background:var(--navy);color:var(--bone);padding:16px;overflow-x:auto;font-size:14px}
+.doc table{border-collapse:collapse;width:100%}.doc td,.doc th{border-bottom:2px solid #13283f33;padding:8px;text-align:left;vertical-align:top}
+.doc :not(pre)>code{background:#13283f14;padding:0 4px}
+.toc{background:var(--rust);color:var(--bone);padding:16px 22px;margin-top:30px}.toc a{margin-right:16px;font-weight:600}
+.doc h1{font-size:clamp(34px,5vw,60px);margin:34px 0 6px;line-height:1}.byline{color:var(--navy);opacity:.75}</style>
+</head>
+<body>
+<header class="mast"><a class="brand" href="../../"><img src="../../logo.svg" alt="" width="34" height="34"> drainready</a><nav><a href="../../">Home</a><a href="../../docs/">Docs</a><a href="https://github.com/Blackman99/drainready">GitHub</a></nav></header>
+<main class="doc">
+<div class="toc">LOG · 2026-10-19 · <a href="zh.html">中文</a></div>
+<h1>The PDB that looks stale but never lets a drain finish</h1>
+<p class="byline">How a PodDisruptionBudget the controller cannot compute hangs <code>kubectl drain</code>, and how to spot it before you cordon.</p>
+<h2>The symptom</h2>
+<p>You drain a node. One pod never leaves. <code>kubectl drain</code> repeats <code>Cannot evict pod as it would violate the pod's disruption budget</code>. The budget looks harmless: <code>maxUnavailable: 1</code>, and every pod it selects is Ready. Nothing is unhealthy, nothing overlaps, and yet <code>kubectl get pdb</code> shows <code>ALLOWED DISRUPTIONS 0</code>.</p>
+<h2>What is going on</h2>
+<p>To turn <code>maxUnavailable</code> (or a percentage <code>minAvailable</code>) into a number, the disruption controller needs the expected replica count. It follows each selected pod's controller owner reference and reads that owner's <code>scale</code> subresource. Deployments, ReplicaSets and StatefulSets have one. Many operator CRDs do not.</p>
+<p>When the lookup fails, the controller takes its fail-safe path. It sets <code>disruptionsAllowed</code> to 0 and adds a condition:</p>
+<pre>status:
+  disruptionsAllowed: 0
+  conditions:
+  - type: DisruptionAllowed
+    status: "False"
+    reason: SyncFailed
+    message: widgets.example.com does not implement the scale subresource</pre>
+<p>The Eviction API answers every request with <code>429</code>, and <code>kubectl drain</code> treats 429 as "try again later", so it retries forever. A managed node-group upgrade waits until its own timeout.</p>
+<h2>The trap: it looks "stale"</h2>
+<p>The fail-safe path does not record <code>status.observedGeneration</code>. For a budget that has never synced, <code>observedGeneration</code> stays below <code>metadata.generation</code>. That is exactly how a budget looks in the few seconds after you edit it, before the controller catches up. Any tool that reads it as "status not processed yet, try again" predicts a short wait. drainready did that too, until this week.</p>
+<h2>How to check by hand</h2>
+<pre>kubectl get pdb -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.status.conditions[?(@.reason=="SyncFailed")].message}{"\n"}{end}' | awk -F'\t' '$2!=""'</pre>
+<p>Every line printed is a budget that blocks all voluntary evictions of its pods until it is fixed.</p>
+<h2>Fixes</h2>
+<ul>
+<li>Use an integer <code>minAvailable</code>. The controller counts the selected pods directly and needs no scale lookup.</li>
+<li>Give the CRD a <code>/scale</code> subresource (<code>subresources.scale</code> in the CRD spec) so the controller can read the replica count.</li>
+<li>Narrow the selector so the budget only covers pods from controllers that have a scale subresource.</li>
+</ul>
+<h2>Before you cordon</h2>
+<p>drainready now checks the <code>DisruptionAllowed</code> condition before it trusts <code>observedGeneration</code> (on <code>main</code> today, in the next release). It reports these pods as BLOCKED, quotes the controller's message, and gives the fix:</p>
+<pre>$ drainready ip-10-0-3-17
+BLOCKED  ip-10-0-3-17   7 pods: 4 ok, 0 wait, 0 need flag, 1 blocked, 2 skipped
+   BLOCKED  ops/widget-0  PDB ops/widget cannot be computed by the disruption controller (SyncFailed: ...), so it allows 0 disruptions
+                          fix: maxUnavailable and percentage minAvailable need every selected pod to belong to a controller with a scale subresource ...</pre>
+<p>CI reproduces this case on a real kind cluster, with a pod owned by a ConfigMap, and cross-checks the prediction with <code>kubectl drain --dry-run=server</code>. Add <code>--markdown</code> to get a report you can paste into the change ticket.</p>
+<p><a href="https://github.com/Blackman99/drainready">drainready on GitHub</a> · <a href="../../docs/">Docs</a></p>
+</main>
+<footer class="quay"><span>MIT · <a href="https://github.com/Blackman99/drainready">Blackman99/drainready</a></span></footer>
+</body></html>
