@@ -38,7 +38,7 @@
 <h1>The PDB that looks stale but never lets a drain finish</h1>
 <p class="byline">How a PodDisruptionBudget the controller cannot compute hangs <code>kubectl drain</code>, and how to spot it before you cordon.</p>
 <h2>The symptom</h2>
-<p>You drain a node. One pod never leaves. <code>kubectl drain</code> repeats <code>Cannot evict pod as it would violate the pod's disruption budget</code>. The budget looks harmless: <code>maxUnavailable: 1</code>, and every pod it selects is Ready. Nothing is unhealthy, nothing overlaps, and yet <code>kubectl get pdb</code> shows <code>ALLOWED DISRUPTIONS 0</code>.</p>
+<p>You drain a node. One pod never leaves. Depending on the budget's history, <code>kubectl drain</code> either repeats <code>Cannot evict pod as it would violate the pod's disruption budget</code>, or prints <code>evicting pod ...</code> and then nothing at all. The budget looks harmless: <code>maxUnavailable: 1</code>, and every pod it selects is Ready. Nothing is unhealthy, nothing overlaps, and yet <code>kubectl get pdb</code> shows <code>ALLOWED DISRUPTIONS 0</code>.</p>
 <h2>What is going on</h2>
 <p>To turn <code>maxUnavailable</code> (or a percentage <code>minAvailable</code>) into a number, the disruption controller needs the expected replica count. It follows each selected pod's controller owner reference and reads that owner's <code>scale</code> subresource. Deployments, ReplicaSets and StatefulSets have one. Many operator CRDs do not.</p>
 <p>When the lookup fails, the controller takes its fail-safe path. It sets <code>disruptionsAllowed</code> to 0 and adds a condition:</p>
@@ -52,6 +52,7 @@
 <p>The Eviction API answers every request with <code>429</code>, and <code>kubectl drain</code> treats 429 as "try again later", so it retries forever. A managed node-group upgrade waits until its own timeout.</p>
 <h2>The trap: it looks "stale"</h2>
 <p>The fail-safe path does not record <code>status.observedGeneration</code>. For a budget that has never synced, <code>observedGeneration</code> stays below <code>metadata.generation</code>. That is exactly how a budget looks in the few seconds after you edit it, before the controller catches up. Any tool that reads it as "status not processed yet, try again" predicts a short wait. drainready did that too, until this week.</p>
+<p>It also explains the silent drain. For a budget the server considers unprocessed, the Eviction API answers <code>429</code> with a <code>Retry-After</code> header, and client-go retries those responses on its own before kubectl sees an error. In our kind test, <code>kubectl drain --dry-run=server --timeout=10s</code> printed <code>evicting pod ops/widget-0</code> and then nothing for 20 seconds, until the test killed it.</p>
 <h2>How to check by hand</h2>
 <pre>kubectl get pdb -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{.status.conditions[?(@.reason=="SyncFailed")].message}{"\n"}{end}' | awk -F'\t' '$2!=""'</pre>
 <p>Every line printed is a budget that blocks all voluntary evictions of its pods until it is fixed.</p>

@@ -62,9 +62,12 @@ kubectl -n ops get pdb widget -o jsonpath='{.status}'; echo
 set +e; $BIN --delete-emptydir-data "$NODE" | tee out3.txt; rc=$?; set -e
 [ $rc -eq 1 ] && grep -q "ops/widget-0" out3.txt && grep -q "SyncFailed" out3.txt
 echo "--- cross-check: real server dry-run drain of that pod is refused"
-set +e; timeout 20 kubectl drain "$NODE" --dry-run=server --pod-selector=app=widget --ignore-daemonsets --delete-emptydir-data --timeout=10s >drain3.txt 2>&1; set -e
-tail -5 drain3.txt
-grep -qi "disruption budget" drain3.txt
+# A never-synced SyncFailed PDB answers 429 with Retry-After, which client-go
+# retries silently: drain prints "evicting pod" and then nothing, ignoring
+# --timeout. So assert that it did not finish rather than grep a message.
+set +e; timeout 20 kubectl drain "$NODE" --dry-run=server --pod-selector=app=widget --ignore-daemonsets --delete-emptydir-data --timeout=10s >drain3.txt 2>&1; drc=$?; set -e
+tail -5 drain3.txt; echo "drain exit: $drc"
+[ $drc -ne 0 ] && ! grep -q "widget-0 evicted" drain3.txt
 echo "--- markdown report names the blocked pod"
 set +e; $BIN --markdown --delete-emptydir-data "$NODE" > out.md; set -e
 cat out.md
