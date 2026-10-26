@@ -16,7 +16,12 @@ Priority order from weekly review (0 traffic/stars after day 1; pain still live 
 ## v0.3
 - **SyncFailed budgets** (shipped 2026-10-19): PDBs whose controller cannot compute them (e.g. maxUnavailable over operator pods without `/scale`) are BLOCKED with the controller's message, even though they look "stale"; e2e reproduces it on kind. Eviction-order parity: unhealthy IfHealthyBudget needs desiredHealthy > 0; negative disruptionsAllowed is a 403, not a hang.
 - **Markdown report** `--markdown` for change tickets / PR comments (shipped 2026-10-19)
-- Detect PVC zone pinning (pods that cannot reschedule anywhere)
+- **Node-pinned volumes** (shipped 2026-10-26): PVs whose node affinity no other schedulable node satisfies (local volumes, zonal disks with no free node in the zone). More pinned pods than the PDB allows is BLOCKED; within budget it warns that the next drain of that workload may stall. e2e reproduces it with a local PV on kind.
+
+## Growth notes (2026-10-26 review)
+- Week 2 after v0.2.0: no issues, PRs or stars; 8 views / 5 unique, 198 clones / 89 unique (mostly CI and mirrors), no referrers. awesome-list PRs still unreviewed. Discovery is still the bottleneck; v0.3.0 release and krew-index submission are waiting for approval.
+- Picked node-pinned volumes this week: it is the one storage case that turns a slow drain into a permanent one, and it stays within "what blocks a drain" (GOAL.md).
+- Next: capacity hint for WAIT pods (requests vs allocatable, taints), limited to replacements a drain is actually waiting on.
 
 ## Growth notes (2026-10-19 review)
 - Week 1 after v0.2.0: 0 stars, ~4 views, 127 clones (mostly CI/bots), first kubectl-drainready archive downloads. Discovery is the bottleneck, so krew-index submission (awaiting approval) stays the top outreach item.

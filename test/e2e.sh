@@ -72,4 +72,53 @@ echo "--- markdown report names the blocked pod"
 set +e; $BIN --markdown --delete-emptydir-data "$NODE" > out.md; set -e
 cat out.md
 grep -q "^## Drain readiness: BLOCKED" out.md && grep -q '`ops/widget-0`' out.md
+echo "--- case 4: two pods on a node-pinned local volume, budget 1 -> BLOCKED"
+kubectl create namespace vault
+cat <<YAML | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: vault-local}
+spec:
+  capacity: {storage: 1Gi}
+  accessModes: [ReadWriteOnce]
+  storageClassName: pinned
+  local: {path: /tmp}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions: [{key: kubernetes.io/hostname, operator: In, values: ["$NODE"]}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: data, namespace: vault}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: pinned
+  volumeName: vault-local
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: vault, namespace: vault}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: vault}}
+  template:
+    metadata: {labels: {app: vault}}
+    spec:
+      containers: [{name: c, image: registry.k8s.io/pause:3.9, volumeMounts: [{name: data, mountPath: /data}]}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: data}}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: vault, namespace: vault}
+spec:
+  maxUnavailable: 1
+  selector: {matchLabels: {app: vault}}
+YAML
+kubectl -n vault rollout status deploy/vault --timeout=120s
+for i in $(seq 30); do
+  [ "$(kubectl -n vault get pdb vault -o jsonpath='{.status.disruptionsAllowed}')" = "1" ] && break; sleep 1; done
+set +e; $BIN --delete-emptydir-data "$NODE" | tee out4.txt; rc=$?; set -e
+[ $rc -eq 1 ] && grep -q "vault/vault-" out4.txt && grep -q "node-pinned" out4.txt && grep -q "PersistentVolume vault-local" out4.txt
 echo "e2e OK"

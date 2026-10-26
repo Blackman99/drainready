@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Blackman99/drainready/check"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -149,13 +150,30 @@ func Evaluate(ctx context.Context, cs kubernetes.Interface, nodes []string, sele
 	if err != nil {
 		return nil, fmt.Errorf("list PodDisruptionBudgets: %w", err)
 	}
+	// Storage hints are best effort: without RBAC for nodes/PVCs/PVs the
+	// PDB prediction still runs, just without the pinned-volume check.
+	var allNodes []corev1.Node
+	var pvcs []corev1.PersistentVolumeClaim
+	var pvs []corev1.PersistentVolume
+	storage := false
+	if nl, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); err == nil {
+		if cl, err := cs.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{}); err == nil {
+			if vl, err := cs.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{}); err == nil {
+				allNodes, pvcs, pvs, storage = nl.Items, cl.Items, vl.Items, true
+			}
+		}
+	}
 	var out []check.NodeResult
 	for _, n := range nodes {
 		pl, err := cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + n})
 		if err != nil {
 			return nil, err
 		}
-		r := check.Node(n, pl.Items, pdbl.Items, opt)
+		o := opt
+		if storage {
+			o.Pinned = check.PinnedVolumes(n, pl.Items, pvcs, pvs, allNodes)
+		}
+		r := check.Node(n, pl.Items, pdbl.Items, o)
 		if serverDry {
 			confirm(ctx, cs, &r)
 		}
@@ -194,7 +212,7 @@ func Print(w io.Writer, results []check.NodeResult, verbose bool) {
 			mark(r.Verdict), r.Node, len(r.Pods), counts[check.OK], counts[check.Wait], counts[check.Flag], counts[check.Blocked], counts[check.Skip])
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, p := range r.Pods {
-			if !verbose && (p.Verdict == check.OK || p.Verdict == check.Skip) {
+			if !verbose && quiet(p) {
 				continue
 			}
 			fmt.Fprintf(tw, "   %s\t%s/%s\t%s\n", p.Verdict, p.Namespace, p.Pod, p.Reason)
@@ -228,7 +246,7 @@ func Markdown(w io.Writer, results []check.NodeResult, verbose, serverDry bool, 
 			mark(r.Verdict), r.Node, len(r.Pods), counts[check.OK], counts[check.Wait], counts[check.Flag], counts[check.Blocked], counts[check.Skip])
 		var rows []check.PodResult
 		for _, p := range r.Pods {
-			if verbose || (p.Verdict != check.OK && p.Verdict != check.Skip) {
+			if verbose || !quiet(p) {
 				rows = append(rows, p)
 			}
 		}
@@ -248,6 +266,12 @@ func Markdown(w io.Writer, results []check.NodeResult, verbose, serverDry bool, 
 			fmt.Fprintf(w, "| **%s** | `%s/%s` | %s | %s | %s |\n", p.Verdict, p.Namespace, p.Pod, pdbs, cell(p.Reason), cell(p.Fix))
 		}
 	}
+}
+
+// quiet reports rows hidden without -v: OK and skipped pods, unless an OK
+// pod carries a heads-up fix (e.g. a node-pinned volume).
+func quiet(p check.PodResult) bool {
+	return p.Verdict == check.Skip || (p.Verdict == check.OK && p.Fix == "")
 }
 
 // cell makes text safe inside a Markdown table cell.

@@ -4,7 +4,7 @@
 
 **Will `kubectl drain` finish on this node?** Know before you cordon.
 
-`kubectl drain` evicts pods through the Eviction API. When a PodDisruptionBudget allows 0 disruptions, the API answers `429` and drain **retries forever**. The message names the pod, not the budget. Managed node-group upgrades (EKS, AKS, GKE) stall for hours or fail. drainready reads the same pods and budgets up front, tells you which pods will block, and explains why: `minAvailable` equal to the replica count, `maxUnavailable: 0`, replicas already unhealthy, overlapping PDBs, a budget the controller cannot compute (`SyncFailed`, e.g. operator pods without a `/scale` subresource), bare pods, `emptyDir`.
+`kubectl drain` evicts pods through the Eviction API. When a PodDisruptionBudget allows 0 disruptions, the API answers `429` and drain **retries forever**. The message names the pod, not the budget. Managed node-group upgrades (EKS, AKS, GKE) stall for hours or fail. drainready reads the same pods and budgets up front, tells you which pods will block, and explains why: `minAvailable` equal to the replica count, `maxUnavailable: 0`, replicas already unhealthy, overlapping PDBs, a budget the controller cannot compute (`SyncFailed`, e.g. operator pods without a `/scale` subresource), bare pods, `emptyDir`, and pods whose PersistentVolume is pinned to the node (local volumes, or a zonal disk with no other schedulable node in its zone), whose replacements can never become ready.
 
 ![demo](site/demo.gif)
 
