@@ -39,6 +39,9 @@ func Worse(a, b Verdict) Verdict {
 type Options struct {
 	Force              bool // --force: allow unmanaged pods
 	DeleteEmptyDirData bool // --delete-emptydir-data
+	// Pinned maps "namespace/pod" to why its PersistentVolume cannot follow
+	// it to another node (see PinnedVolumes). Nil disables the storage check.
+	Pinned map[string]string
 }
 
 // PodResult explains the verdict for one pod.
@@ -63,6 +66,8 @@ func Node(node string, pods []corev1.Pod, pdbs []policyv1.PodDisruptionBudget, o
 	res := NodeResult{Node: node, Verdict: OK}
 	// how many evictable pods on this node each PDB covers
 	perPDB := map[string]int{}
+	// how many of those pods cannot come back elsewhere (node-pinned volumes)
+	pinnedPDB := map[string]int{}
 	matches := make([][]*policyv1.PodDisruptionBudget, len(pods))
 	for i := range pods {
 		if skipReason(&pods[i]) != "" {
@@ -72,11 +77,15 @@ func Node(node string, pods []corev1.Pod, pdbs []policyv1.PodDisruptionBudget, o
 			if covers(&pdbs[j], &pods[i]) {
 				matches[i] = append(matches[i], &pdbs[j])
 				perPDB[key(&pdbs[j])]++
+				if _, ok := opt.Pinned[pods[i].Namespace+"/"+pods[i].Name]; ok {
+					pinnedPDB[key(&pdbs[j])]++
+				}
 			}
 		}
 	}
 	for i := range pods {
 		r := pod(&pods[i], matches[i], perPDB, opt)
+		r = pinned(&pods[i], matches[i], r, perPDB, pinnedPDB, opt)
 		res.Verdict = Worse(res.Verdict, r.Verdict)
 		res.Pods = append(res.Pods, r)
 	}
@@ -197,6 +206,41 @@ func pod(p *corev1.Pod, m []*policyv1.PodDisruptionBudget, perPDB map[string]int
 	default:
 		if r.Verdict == OK {
 			r.Reason = fmt.Sprintf("PDB %s allows %d disruption(s)", key(b), allowed)
+		}
+	}
+	return r
+}
+
+// pinned adjusts a result for pods whose volume cannot follow them. Every
+// such eviction spends one disruption of its PDB until the node comes back,
+// because the replacement stays Pending. If the node holds more pinned pods
+// of a budget than it allows, drain can never finish.
+func pinned(p *corev1.Pod, m []*policyv1.PodDisruptionBudget, r PodResult, perPDB, pinnedPDB map[string]int, opt Options) PodResult {
+	why, ok := opt.Pinned[p.Namespace+"/"+p.Name]
+	if !ok || r.Verdict == Skip || r.Verdict == Blocked || len(m) > 1 {
+		return r
+	}
+	if len(m) == 0 {
+		if r.Verdict == OK {
+			r.Reason = "evicts, but its replacement stays Pending until this node is back: " + why
+			r.Fix = "expect downtime for this pod, or move its data to storage other nodes can attach"
+		}
+		return r
+	}
+	b := m[0]
+	pc, allowed := int32(pinnedPDB[key(b)]), b.Status.DisruptionsAllowed
+	switch {
+	case pc > allowed:
+		r.Verdict = Blocked
+		r.Reason = fmt.Sprintf("%d pod(s) of PDB %s here have node-pinned volumes but it allows only %d disruption(s); their replacements can never become ready, so drain retries forever: %s",
+			pc, key(b), allowed, why)
+		r.Fix = "drain with the volume's node in mind: scale the workload so the budget covers the pinned pods, or move the data to storage other nodes can attach"
+	case r.Verdict == OK || r.Verdict == Wait:
+		r.Reason += "; its replacement stays Pending until this node is back (" + why + ")"
+		r.Fix = fmt.Sprintf("after this drain PDB %s has %d fewer disruption(s) until the node returns, so draining another node of this workload may stall", key(b), pc)
+		if int32(perPDB[key(b)]) > pc && pc == allowed {
+			r.Verdict = Worse(r.Verdict, Wait)
+			r.Reason = fmt.Sprintf("PDB %s allows %d disruption(s) and %d pinned pod(s) here use them all if evicted first, so the other replicas here may wait forever; ", key(b), allowed, pc) + r.Reason
 		}
 	}
 	return r
